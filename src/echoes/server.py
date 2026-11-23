@@ -3,11 +3,39 @@
 import json
 import sqlite3
 from contextlib import closing
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from re import DOTALL, sub
 from urllib.parse import parse_qs, urlsplit
 
 from .contexts import phrase_graph
+
+
+PAGE_LABELS = {
+    "/poet-style.html": "Poet style",
+    "/phrase-contexts.html": "Phrase contexts",
+    "/data-cleaning.html": "Data and methods",
+}
+
+
+def app_page(document, current_path):
+    links = []
+    for path, label in PAGE_LABELS.items():
+        current = ' aria-current="page"' if path == current_path else ""
+        links.append(f'<a href="{path}"{current}>{escape(label)}</a>')
+    header = (
+        '<header class="app-header"><div class="app-bar">'
+        '<a class="app-brand" href="/">Echoes Across Dynasties</a>'
+        f'<nav aria-label="Project pages">{"".join(links)}</nav>'
+        '</div></header>'
+    )
+    # The standalone reports include their own companion links.
+    document = sub(
+        r'<nav aria-label="Project pages">.*?</nav>\s*', "", document, count=1, flags=DOTALL
+    )
+    document = document.replace("</style>", '</style>\n<link rel="stylesheet" href="/app.css">', 1)
+    return document.replace("<main>", f"{header}\n<main>", 1)
 
 
 def serve(db, sample, output, port):
@@ -18,16 +46,17 @@ def serve(db, sample, output, port):
         metadata = json.loads(row[0]) if row else {}
         if any(metadata.get(key) != manifest[key] for key in ("dataset_revision", "sources")):
             raise ValueError("Sample manifest and corpus database have different source provenance")
-    pages = {
-        "/" + name: (output / name).read_text(encoding="utf-8").replace(
-            "</nav>", ' · <a href="phrase-contexts.html">Phrase contexts</a></nav>', 1
-        )
+    documents = {
+        "/" + name: (output / name).read_text(encoding="utf-8")
         for name in ("poet-style.html", "data-cleaning.html")
     }
-    pages["/"] = pages["/poet-style.html"]
-    pages["/phrase-contexts.html"] = files("echoes").joinpath(
+    resources = files("echoes")
+    documents["/phrase-contexts.html"] = resources.joinpath(
         "phrase_contexts.html"
     ).read_text(encoding="utf-8")
+    pages = {path: app_page(document, path) for path, document in documents.items()}
+    pages["/"] = pages["/poet-style.html"]
+    stylesheet = resources.joinpath("app.css").read_text(encoding="utf-8")
 
     class Handler(BaseHTTPRequestHandler):
         def reply(self, status, content_type, body):
@@ -42,6 +71,8 @@ def serve(db, sample, output, port):
             url = urlsplit(self.path)
             if url.path in pages:
                 self.reply(200, "text/html", pages[url.path])
+            elif url.path == "/app.css":
+                self.reply(200, "text/css", stylesheet)
             elif url.path == "/api/phrase":
                 query = parse_qs(url.query)
                 try:
@@ -61,7 +92,7 @@ def serve(db, sample, output, port):
                 self.send_error(404)
 
     with ThreadingHTTPServer(("127.0.0.1", port), Handler) as server:
-        print(f"Open http://127.0.0.1:{server.server_port}/phrase-contexts.html", flush=True)
+        print(f"Open http://127.0.0.1:{server.server_port}/", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

@@ -112,7 +112,7 @@ This is a schema smoke check, not full-corpus validation or a literary assessmen
 The smoke run used a placeholder revision and temporary database; it is not a
 research dataset or a reproducible experimental result. Run against a pinned checkout.
 
-## Explore phrase contexts
+## Run the web app
 
 After generating the PCA pages, run:
 
@@ -120,7 +120,9 @@ After generating the PCA pages, run:
 uv run echoes serve
 ```
 
-Open [Phrase contexts](http://127.0.0.1:8000/phrase-contexts.html) and try `秋風` or `秋风`. The default spelling mode searches both variants.
+Open [Echoes Across Dynasties](http://127.0.0.1:8000/) and use the navbar to
+switch between **Poet style**, **Phrase contexts**, and **Data and methods**.
+In Phrase contexts, try `秋風` or `秋风`. The default spelling mode searches both variants.
 Choose **Exact spelling** to keep the search literal.
 Switch between all cleaned poems by the cohort and the exact Poet Style sample.
 Select a graph edge or use the pair menu to compare passages. The coverage table
