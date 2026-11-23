@@ -35,6 +35,10 @@ Outputs:
 - `outputs/poet-style.html`: self-contained PCA scatterplot. Open the file in a
   browser, select the two axes, and hover over or focus a point for poet details.
   Switch between Verse structure and Character use with the View selector.
+  Search for eligible poets by simplified or traditional name and choose who to
+  display. Both weighting options fit all eligible poets. Equal weight per poet
+  gives every poet the same weight, and equal weight per dynasty gives each
+  collection half the total weight. The plot opens with the saved sample selected.
   The character view uses individual Han character rates and shows the strongest
   positive and negative weights for the two selected axes. Each plot needs at
   least two nonzero principal components.
@@ -62,7 +66,8 @@ can contain multiple verse lines, so punctuation is split before measuring form.
 The schema was checked against an upstream Tang shard; run against your pinned
 checkout to verify every file rather than assuming the entire corpus is uniform.
 
-Default: 25 poets per source collection, each with 100 distinct clean poems.
+Default starting sample: 25 poets per source collection, each with 100 distinct
+clean poems. PCA profiles every poet who meets the same poem cutoff.
 Selection is hash-ranked with a fixed seed, not ranked by fame or phrase frequency.
 The command fails clearly if either collection lacks enough eligible poets.
 Use `form = "uniform_5"` for a controlled five-character-line cohort; rebuild a
@@ -124,7 +129,8 @@ Open [Echoes Across Dynasties](http://127.0.0.1:8000/) and use the navbar to
 switch between **Poet style**, **Phrase contexts**, and **Data and methods**.
 In Phrase contexts, try `秋風` or `秋风`. The default spelling mode searches both variants.
 Choose **Exact spelling** to keep the search literal.
-Switch between all cleaned poems by the cohort and the exact Poet Style sample.
+Switch between all cleaned poems by the cohort and the exact starting sample
+from Poet Style.
 Select a graph edge or use the pair menu to compare passages. The coverage table
 includes every cohort poet and gives access to examples even below the graph's
 five-matching-poem threshold. Edges measure contextual wording similarity using

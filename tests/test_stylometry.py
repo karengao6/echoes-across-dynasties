@@ -1,6 +1,7 @@
 from collections import Counter
 from statistics import mean, pvariance
 
+import numpy as np
 import pytest
 
 from echoes.stylometry import character_pca, principal_components
@@ -22,6 +23,17 @@ def test_pca_orders_scores_by_variance_and_drops_constant_column():
 def test_pca_rejects_a_sample_with_fewer_than_two_components():
     with pytest.raises(ValueError, match="at least two varying components"):
         principal_components([(1,), (2,), (3,)])
+
+
+def test_weighted_pca_centers_and_diagonalizes_the_weighted_scores():
+    rows = [(-1, -1), (-1, 1), (1, 0), (3, 1), (4, 1)]
+    weights = [1 / 4, 1 / 4, 1 / 6, 1 / 6, 1 / 6]
+    scores, variance = principal_components(rows, weights)
+    _, equal_variance = principal_components(rows)
+    assert np.average(scores, axis=0, weights=weights) == pytest.approx([0, 0])
+    first, second = np.asarray(scores).T
+    assert np.average(first * second, weights=weights) == pytest.approx(0)
+    assert variance != pytest.approx(equal_variance)
 
 
 def test_character_pca_recovers_frequency_contrasts_and_loadings():

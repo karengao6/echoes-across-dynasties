@@ -36,6 +36,12 @@
   .roster-groups h3 { font-size: .875rem; margin: 0; }
   .roster-groups ul { list-style: none; margin: .25rem 0 0; padding: 0; }
   .roster-groups li { overflow-wrap: anywhere; }
+  .poet-picker { margin-bottom: 1rem; }
+  .poet-picker label { display: block; }
+  .poet-picker input[type="search"] { box-sizing: border-box; width: 100%; font: inherit; }
+  #poet-results { max-height: 11rem; overflow: auto; margin: .5rem 0; }
+  .picker-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .picker-actions button { font: inherit; font-size: .875rem; }
   @media (max-width: 48rem) {
     .plot-layout { grid-template-columns: minmax(0, 1fr); }
   }
@@ -55,9 +61,14 @@
       <option value="structure">Verse structure</option>
       <option value="characters">Character use</option>
     </select></label>
+    <label>PCA weighting <select id="weighting" aria-describedby="fit-description">
+      <option value="equal">Equal weight per poet</option>
+      <option value="balanced">Equal weight per dynasty</option>
+    </select></label>
     <label>Horizontal axis <select id="horizontal"></select></label>
     <label>Vertical axis <select id="vertical"></select></label>
   </div>
+  <p id="fit-description"></p>
   <p class="legend">
     <span><span class="tang" aria-hidden="true">●</span> <span id="tang-legend">Tang collection</span></span>
     <span><span class="song" aria-hidden="true">■</span> <span id="song-legend">Song collection</span></span>
@@ -77,6 +88,16 @@
     </div>
     <aside class="poet-roster" aria-labelledby="roster-heading">
       <h2 id="roster-heading">Poets compared</h2>
+      <div class="poet-picker">
+        <label for="poet-search">Search poets</label>
+        <input id="poet-search" type="search" autocomplete="off">
+        <p id="no-matches" hidden>No matching poets.</p>
+        <div id="poet-results" role="group" aria-label="Matching poets"></div>
+        <div class="picker-actions">
+          <button type="button" id="clear-poets">Clear selection</button>
+          <button type="button" id="restore-poets">Restore sample</button>
+        </div>
+      </div>
       <div class="roster-groups">
         <section aria-labelledby="tang-roster-heading">
           <h3 id="tang-roster-heading" class="tang">Tang</h3>
@@ -109,8 +130,20 @@
 </main>
 <script type="application/json" id="pca-data"><!-- PCA_DATA --></script>
 <script>
-  const { poets, views } = JSON.parse(document.querySelector('#pca-data').textContent);
+  const { poets, fits } = JSON.parse(document.querySelector('#pca-data').textContent);
   const representation = document.querySelector('#representation');
+  const weighting = document.querySelector('#weighting');
+  const fitDescription = document.querySelector('#fit-description');
+  const poetSearch = document.querySelector('#poet-search');
+  const poetResults = document.querySelector('#poet-results');
+  const noMatches = document.querySelector('#no-matches');
+  const defaultSelection = poets.flatMap((poet, index) => poet.selected ? [index] : []);
+  const selectedPoets = new Set(defaultSelection);
+  const groupNames = { tang: 'Tang', song: 'Song' };
+  const poetChoices = poets.map((poet, index) => ({ poet, index })).sort(
+    (a, b) => a.poet.author.localeCompare(b.poet.author, 'zh-Hant'),
+  );
+  const currentView = () => fits[weighting.value][representation.value];
   const viewDescription = document.querySelector('#view-description');
   const structureMethod = document.querySelector('#structure-method');
   const characterMethod = document.querySelector('#character-method');
@@ -139,18 +172,60 @@
   const axisLabel = (index, variance) => `${axisName(index)} (${percent.format(variance[index])})`;
   const format = score => Number(score.toPrecision(3)).toString();
 
-  for (const [dynasty, name] of [['tang', 'Tang'], ['song', 'Song']]) {
-    const group = poets.filter(poet => poet.dynasty === dynasty);
-    const count = group.length;
-    const noun = count === 1 ? 'poet' : 'poets';
-    document.querySelector(`#${dynasty}-legend`).textContent =
-      `${name} collection (${count.toLocaleString('en')} ${noun})`;
-    const roster = document.querySelector(`#${dynasty}-poets`);
-    for (const poet of group) {
-      const item = document.createElement('li');
-      item.textContent = poet.author;
-      roster.append(item);
+  function renderRoster() {
+    for (const [dynasty, name] of Object.entries(groupNames)) {
+      const group = poetChoices.filter(({ poet, index }) =>
+        poet.dynasty === dynasty && selectedPoets.has(index));
+      const noun = group.length === 1 ? 'poet' : 'poets';
+      document.querySelector(`#${dynasty}-legend`).textContent =
+        `${name} collection (${group.length.toLocaleString('en')} ${noun})`;
+      const roster = document.querySelector(`#${dynasty}-poets`);
+      roster.replaceChildren();
+      for (const { poet } of group) {
+        const item = document.createElement('li');
+        item.textContent = poet.author;
+        roster.append(item);
+      }
     }
+  }
+
+  function renderPoetChoices() {
+    const query = poetSearch.value.normalize('NFC').trim().toLowerCase();
+    const matches = poetChoices.filter(({ poet }) =>
+      [poet.author, ...poet.aliases, groupNames[poet.dynasty]].some(
+        value => value.toLowerCase().includes(query),
+      ));
+    poetResults.replaceChildren();
+    noMatches.hidden = matches.length > 0;
+    for (const { poet, index } of matches) {
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = selectedPoets.has(index);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedPoets.add(index);
+        else selectedPoets.delete(index);
+        renderRoster();
+        render();
+      });
+      const name = document.createElement('span');
+      name.lang = 'zh-Hant';
+      name.textContent = poet.author;
+      label.append(checkbox, ' ', name, ` · ${groupNames[poet.dynasty]}`);
+      poetResults.append(label);
+    }
+    poetResults.scrollTop = 0;
+  }
+
+  poetSearch.addEventListener('input', renderPoetChoices);
+  for (const [id, selection] of [['clear-poets', []], ['restore-poets', defaultSelection]]) {
+    document.querySelector(`#${id}`).addEventListener('click', () => {
+      selectedPoets.clear();
+      for (const index of selection) selectedPoets.add(index);
+      renderRoster();
+      renderPoetChoices();
+      render();
+    });
   }
 
   function updateZoomControls() {
@@ -226,20 +301,27 @@
     });
   }
 
-  for (const item of views.structure.features) {
+  for (const item of fits.equal.structure.features) {
     const li = document.createElement('li');
     li.textContent = item;
     document.querySelector('#features').append(li);
   }
-  const characterView = views.characters;
+  const characterView = fits.equal.characters;
   characterMethod.textContent = `Uses ${characterView.vocabularySize.toLocaleString()} Han characters `
-    + `found in at least ${characterView.minimumPoets} sampled poets. Counts are divided by all `
+    + `found in at least ${characterView.minimumPoets} eligible poets. Counts are divided by all `
     + 'Han characters in each poet’s sample and expressed per 1,000. PCA centers each character’s '
     + 'frequency across poets and keeps the original frequency scale. Shared characters can reflect '
     + 'diction or subject matter. This view measures individual characters and ignores their order.';
 
   function resetAxes() {
-    const view = views[representation.value];
+    const view = currentView();
+    const tangCount = poets.filter(poet => poet.dynasty === 'tang').length;
+    const songCount = poets.length - tangCount;
+    const influence = weighting.value === 'balanced'
+      ? 'Tang and Song each contribute half the total weight.'
+      : 'Each poet contributes the same weight.';
+    fitDescription.textContent = `Axes fitted using all ${tangCount} eligible Tang and ${songCount} eligible Song poets. `
+      + influence + ' Changing the selection keeps the axes fixed.';
     const isCharacters = representation.value === 'characters';
     viewDescription.textContent = isCharacters
       ? 'Each point is a poet. Nearby points use individual Han characters at similar rates along the selected components.'
@@ -290,7 +372,7 @@
   }
 
   function render(updateDetails = true) {
-    const { scores, variance, loadings, unavailable } = views[representation.value];
+    const { scores, variance, loadings, unavailable } = currentView();
     const xAxis = Number(horizontal.value);
     const yAxis = Number(vertical.value);
     plot.replaceChildren();
@@ -303,7 +385,9 @@
     }
     plot.setAttribute('aria-label', `${representation.selectedOptions[0].textContent} PCA, `
       + `${axisName(xAxis)} vs ${axisName(yAxis)}`);
-    if (updateDetails) detail.textContent = 'Focus or select a point to see the poet and their scores.';
+    if (updateDetails) detail.textContent = selectedPoets.size
+      ? 'Focus or select a point to see the poet and their scores.'
+      : 'Search and select poets to display on the plot.';
     if (updateDetails && loadings) {
       showLoadings(xAxis, loadings[xAxis]);
       showLoadings(yAxis, loadings[yAxis]);
@@ -349,7 +433,8 @@
       x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top,
     }, '', clip);
     const points = draw('g', { 'clip-path': 'url(#plot-clip)' });
-    for (const [index, poet] of poets.entries()) {
+    for (const index of selectedPoets) {
+      const poet = poets[index];
       const xScore = scores[index][xAxis];
       const yScore = scores[index][yAxis];
       const x = xPosition(xScore);
@@ -381,6 +466,9 @@
     });
   }
   representation.addEventListener('change', resetAxes);
+  weighting.addEventListener('change', resetAxes);
+  renderRoster();
+  renderPoetChoices();
   resetAxes();
 </script>
 </html>

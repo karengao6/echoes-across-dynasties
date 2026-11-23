@@ -10,7 +10,7 @@ def rank(seed: int, value: str) -> str:
 
 
 def select(
-    con: sqlite3.Connection, seed=42, poets_per_dynasty=25, poems_per_poet=100, form=""
+    con: sqlite3.Connection, seed=42, poets_per_dynasty=25, poems_per_poet=100, form="", *, all_eligible=False
 ) -> dict:
     if poets_per_dynasty < 1 or poems_per_poet < 1:
         raise ValueError("Sample sizes must be positive")
@@ -34,7 +34,8 @@ def select(
         ]
         if len(eligible) < poets_per_dynasty:
             raise ValueError(f"{dynasty}: {len(eligible)} eligible poets; need {poets_per_dynasty}")
-        for poet in sorted(eligible, key=lambda p: rank(seed, p["poet_id"]))[:poets_per_dynasty]:
+        ordered = sorted(eligible, key=lambda p: rank(seed, p["poet_id"]))
+        for poet in ordered if all_eligible else ordered[:poets_per_dynasty]:
             selected.append(
                 {
                     "poet_id": poet["poet_id"],

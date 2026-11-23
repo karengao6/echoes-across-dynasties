@@ -6,6 +6,10 @@ from collections import Counter
 from importlib.resources import files
 from statistics import mean, pstdev
 
+import numpy as np
+from opencc import OpenCC
+
+from .sampling import select
 from .text import lines
 
 FEATURES = (
@@ -34,80 +38,43 @@ def structural_features(poems):
     )
 
 
-def principal_components(rows):
-    """Return scores and variance shares for the nonzero standardized components."""
-    columns = []
-    for feature in zip(*rows):
-        spread = pstdev(feature)
-        if spread:
-            center = mean(feature)
-            columns.append([(value - center) / spread for value in feature])
+def fit_components(rows, weights=None, *, standardize=False):
+    """Fit weighted PCA and project each row in the original score units."""
+    rows = np.asarray(rows, dtype=float)
+    if weights is None:
+        weights = np.ones(len(rows)) / len(rows)
+    centered = rows - np.average(rows, axis=0, weights=weights)
+    if standardize:
+        spread = np.sqrt(np.average(centered ** 2, axis=0, weights=weights))
+        varying = np.ptp(rows, axis=0) > 0
+        centered = centered[:, varying] / spread[varying]
 
-    covariance = [
-        [sum(a * b for a, b in zip(x, y)) / len(rows) for y in columns]
-        for x in columns
-    ]
-    eigenvalues, vectors = symmetric_eigenvectors(covariance)
-    components = ranked_components(eigenvalues)
-    total = sum(eigenvalues[i] for i in components)
-
-    # Fix the arbitrary sign of each axis using its largest absolute loading.
-    scores = []
-    for i in components:
-        weights = [row[i] for row in vectors]
-        sign = math.copysign(1, max(weights, key=abs))
-        scores.append([
-            sign * sum(value * weight for value, weight in zip(row, weights))
-            for row in zip(*columns)
-        ])
-    return list(zip(*scores)), [eigenvalues[i] / total for i in components]
-
-
-def symmetric_eigenvectors(matrix):
-    """Diagonalize a small symmetric matrix in place; return column eigenvectors."""
-    size = len(matrix)
-    vectors = [[float(i == j) for j in range(size)] for i in range(size)]
-
-    # Jacobi rotations diagonalize the small symmetric matrix matrix.
-    # Rotating the identity matrix in parallel records its eigenvectors.
-    pairs = [(i, j) for i in range(size) for j in range(i + 1, size)]
-    for _ in range(100 * size**2):
-        if not pairs:
-            break
-        i, j = max(pairs, key=lambda pair: abs(matrix[pair[0]][pair[1]]))
-        cross = matrix[i][j]
-        if abs(cross) < 1e-12:
-            break
-        a, b = matrix[i][i], matrix[j][j]
-        angle = math.atan2(2 * cross, b - a) / 2
-        c, s = math.cos(angle), math.sin(angle)
-        for k in range(size):
-            if k not in (i, j):
-                x, y = matrix[k][i], matrix[k][j]
-                matrix[k][i] = matrix[i][k] = c * x - s * y
-                matrix[k][j] = matrix[j][k] = s * x + c * y
-            x, y = vectors[k][i], vectors[k][j]
-            vectors[k][i], vectors[k][j] = c * x - s * y, s * x + c * y
-        matrix[i][i] = c * c * a - 2 * c * s * cross + s * s * b
-        matrix[j][j] = s * s * a + 2 * c * s * cross + c * c * b
-        matrix[i][j] = matrix[j][i] = 0.0
+    weighted = centered * np.sqrt(weights)[:, None]
+    if weighted.shape[1] > weighted.shape[0]:
+        eigenvalues, directions = np.linalg.eigh(weighted @ weighted.T)
     else:
-        if size:
-            raise ValueError("PCA failed to converge")
-
-    return [matrix[i][i] for i in range(size)], vectors
-
-
-def ranked_components(eigenvalues):
-    components = sorted(range(len(eigenvalues)), key=eigenvalues.__getitem__, reverse=True)
-    tolerance = max(eigenvalues, default=0) * 1e-10
-    components = [i for i in components if eigenvalues[i] > tolerance]
-    if len(components) < 2:
+        eigenvalues, directions = np.linalg.eigh(weighted.T @ weighted)
+    tolerance = eigenvalues[-1] * 1e-10 if eigenvalues.size else 0
+    keep = np.flatnonzero(eigenvalues > tolerance)[::-1]
+    if len(keep) < 2:
         raise ValueError("PCA needs at least two varying components; try a larger sample")
-    return components
+
+    eigenvalues = eigenvalues[keep]
+    directions = directions[:, keep]
+    if weighted.shape[1] > weighted.shape[0]:
+        directions = (weighted.T @ directions) / np.sqrt(eigenvalues)
+    largest = np.argmax(np.abs(directions), axis=0)
+    directions *= np.sign(directions[largest, np.arange(len(keep))])
+    return centered @ directions, eigenvalues / eigenvalues.sum(), directions
 
 
-def character_pca(counts):
+def principal_components(rows, weights=None):
+    """Return scores and variance shares for the nonzero standardized components."""
+    scores, variance, _ = fit_components(rows, weights, standardize=True)
+    return scores.tolist(), variance.tolist()
+
+
+def character_pca(counts, weights=None):
     """Fit centered PCA on characters per 1,000 Han characters."""
     coverage = Counter(char for poet in counts for char in poet)
     minimum = max(2, math.ceil(len(counts) * 0.2))
@@ -118,46 +85,29 @@ def character_pca(counts):
     for poet in counts:
         total_chars = poet.total()
         rows.append([1000 * poet[char] / total_chars for char in vocabulary])
-    centers = [mean(column) for column in zip(*rows)]
-    centered = [[value - center for value, center in zip(row, centers)] for row in rows]
-
-    # With many more characters than poets, diagonalize XXᵀ in poet space.
-    # For eigenvector u and eigenvalue λ, Xᵀu/√λ gives the character weights.
-    gram = [[0.0] * len(rows) for _ in rows]
-    for i, row in enumerate(centered):
-        for j in range(i + 1):
-            gram[i][j] = gram[j][i] = sum(a * b for a, b in zip(row, centered[j]))
-    eigenvalues, vectors = symmetric_eigenvectors(gram)
     view = {"minimumPoets": minimum, "vocabularySize": len(vocabulary)}
     try:
-        components = ranked_components(eigenvalues)
+        scores, variance, directions = fit_components(rows, weights)
     except ValueError:
         return {**view, "unavailable": "Fewer than two varying components in this character sample."}
 
-    total = sum(eigenvalues[i] for i in components)
-    scores, loadings = [], []
-    columns = list(zip(*centered))
-    for i in components:
-        scale = math.sqrt(eigenvalues[i])
-        direction = [row[i] for row in vectors]
-        weights = [sum(a * b for a, b in zip(col, direction)) / scale for col in columns]
-        sign = math.copysign(1, max(weights, key=abs))
-        scores.append([sign * scale * value for value in direction])
-        ranked = sorted(zip(vocabulary, (sign * w for w in weights)), key=lambda item: item[1])
+    loadings = []
+    for direction in directions.T:
+        ranked = sorted(zip(vocabulary, direction.tolist()), key=lambda item: item[1])
         loadings.append({
             "positive": [item for item in reversed(ranked[-6:]) if item[1] > 1e-10],
             "negative": [item for item in ranked[:6] if item[1] < -1e-10],
         })
     return {
         **view,
-        "scores": list(zip(*scores)),
-        "variance": [eigenvalues[i] / total for i in components],
+        "scores": scores.tolist(),
+        "variance": variance.tolist(),
         "loadings": loadings,
     }
 
 
 def poet_pca(con, manifest):
-    """Load exactly the manifest's poems and project one row per poet."""
+    """Fit both weighting schemes across eligible poets, using the manifest settings."""
     row = con.execute("SELECT value FROM metadata WHERE key='ingestion'").fetchone()
     if row is None:
         raise ValueError("Database is missing its ingestion metadata")
@@ -165,8 +115,19 @@ def poet_pca(con, manifest):
     if any(metadata[key] != manifest[key] for key in ("dataset_revision", "sources")):
         raise ValueError("Sample manifest and corpus database have different source provenance")
 
+    eligible = select(
+        con, manifest["seed"], manifest["poets_per_dynasty"], manifest["poems_per_poet"],
+        manifest["form"], all_eligible=True,
+    )
+    initial = {poet["poet_id"]: poet for poet in manifest["poets"]}
+    if not initial.keys() <= {poet["poet_id"] for poet in eligible["poets"]}:
+        raise ValueError("Sample manifest contains poets who are ineligible in this database")
+    simplified = OpenCC("t2s.json")
+    traditional = OpenCC("s2t.json")
     poets, features, counts = [], [], []
-    for poet in manifest["poets"]:
+    for eligible_poet in eligible["poets"]:
+        poet_id = eligible_poet["poet_id"]
+        poet = initial.get(poet_id, eligible_poet)
         poems = []
         for poem_id in poet["poem_ids"]:
             row = con.execute(
@@ -182,18 +143,24 @@ def poet_pca(con, manifest):
         counts.append(Counter(char for poem in poems for line in poem for char in line))
         poets.append({
             "author": poet["author"],
+            "aliases": sorted({
+                simplified.convert(poet["author"]), traditional.convert(poet["author"]),
+            } - {poet["author"]}),
+            "selected": poet_id in initial,
             "dynasty": poet["dynasty"],
             "poemCount": len(poems),
         })
 
-    scores, variance = principal_components(features)
-    return {
-        "poets": poets,
-        "views": {
+    group_sizes = Counter(poet["dynasty"] for poet in poets)
+    balanced = np.array([1 / (len(group_sizes) * group_sizes[p["dynasty"]]) for p in poets])
+    fits = {}
+    for name, weights in (("equal", None), ("balanced", balanced)):
+        scores, variance = principal_components(features, weights)
+        fits[name] = {
             "structure": {"scores": scores, "variance": variance, "features": FEATURES},
-            "characters": character_pca(counts),
-        },
-    }
+            "characters": character_pca(counts, weights),
+        }
+    return {"poets": poets, "fits": fits}
 
 
 def render_page(data):

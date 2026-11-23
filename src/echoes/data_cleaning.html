@@ -54,9 +54,15 @@
         <th scope="col">Song</th><th scope="col">Total</th></tr></thead>
       <tbody>{eligibility_rows}</tbody>
     </table>
-    <p>The plot uses {tang} Tang and {song} Song poet identities, with {cutoff} poems
-      per poet ({sampled_poems} poems total). Seed {seed} fixes the ordering used to
-      select eligible poets and poems, so rerunning with the same inputs reproduces the sample.</p>
+    <p>The PCA fits use every eligible poet, with {cutoff} poems per poet. The viewer
+      opens with {tang} Tang and {song} Song poet identities selected ({sampled_poems}
+      poems in the starting sample). Seed {seed} fixes the ordering used to select the
+      starting poets and each poet’s poems.</p>
+    <p>Equal weight per poet gives every poet the same influence on the fit. Equal
+      weight per dynasty splits the total influence equally between Tang and Song and
+      divides each share among that dynasty’s poets. Each weighting fits separate axes
+      for verse structure and character use. Selecting poets changes which points
+      appear on the plot.</p>
     <p>Equal poem counts give each profile the same number of works, while total line and
       character counts can differ. The cutoff favors authors with more surviving works in
       this corpus. Comparing repeated samples and different cutoffs can show how sensitive
@@ -85,7 +91,8 @@
     <p>The Character use view counts individual Han characters from the same sampled
       poems. Each count is divided by the poet’s total sampled Han characters and
       expressed per 1,000. The shared vocabulary keeps characters found in at least
-      20% of sampled poets, rounded up, with a minimum of two poets.</p>
+      20% of eligible poets, rounded up, with a minimum of two poets. Both weightings
+      use this same vocabulary.</p>
     <p>PCA centers the rates for each character across poets. It preserves their original
       scale so that differences of the same size in usage rate count equally before
       projection. Loadings show which characters pull scores up or down on each
