@@ -25,7 +25,7 @@ uv run echoes pca
 ```
 
 `uv.lock` is included. Use `uv sync --locked` to reproduce the tested environment.
-The Python pipeline uses only the standard library; development tools are locked separately.
+Phrase search uses OpenCC for spelling aliases. Development tools are locked separately.
 
 Outputs:
 - `data/poetry.sqlite`: source paragraphs, normalized searchable Han text, provisional poet
@@ -70,8 +70,8 @@ separate sample manifest for each design. Counts are equalized, character budget
 are not: add length matching in the baseline stage.
 
 Source text remains unchanged. Normalized text uses NFC and retains Han characters;
-no script conversion or historical spelling correction occurs. Search examples must
-therefore use corpus spelling (e.g. 秋風 rather than 秋风). Unicode Han detection
+no script conversion or historical spelling correction occurs. Phrase search can expand simplified and traditional spellings without changing
+the corpus text. Unicode Han detection
 uses broad codepoint ranges and is not a linguistic word segmenter.
 Known damage markers and anonymous names are excluded. These checks are heuristics,
 not complete textual authentication. Punctuation-insensitive identical text is
@@ -120,7 +120,8 @@ After generating the PCA pages, run:
 uv run echoes serve
 ```
 
-Open [Phrase contexts](http://127.0.0.1:8000/phrase-contexts.html) and try `秋風`.
+Open [Phrase contexts](http://127.0.0.1:8000/phrase-contexts.html) and try `秋風` or `秋风`. The default spelling mode searches both variants.
+Choose **Exact spelling** to keep the search literal.
 Switch between all cleaned poems by the cohort and the exact Poet Style sample.
 Select a graph edge or use the pair menu to compare passages. The coverage table
 includes every cohort poet and gives access to examples even below the graph's

@@ -48,7 +48,7 @@ def serve(db, sample, output, port):
                     with closing(sqlite3.connect(database, uri=True)) as con:
                         result = phrase_graph(
                             con, manifest, query.get("q", [""])[0],
-                            query.get("scope", ["all"])[0],
+                            query.get("scope", ["all"])[0], query.get("script", ["both"])[0],
                         )
                 except ValueError as exc:
                     self.reply(400, "application/json", json.dumps({"error": str(exc)}))

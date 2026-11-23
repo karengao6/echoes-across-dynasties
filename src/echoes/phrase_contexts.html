@@ -19,8 +19,12 @@
   .song { fill: #226e75; color: #226e75; }
   svg { display: block; width: 100%; height: auto; }
   svg text { font-size: 15px; paint-order: stroke; stroke: white; stroke-width: 4px; }
-  svg g, svg line { cursor: pointer; }
-  svg .selected, svg line:hover { stroke: #18262d; }
+  svg g { cursor: pointer; }
+  .edge-line { stroke: #a6b5b5; pointer-events: none; }
+  .edge:hover .edge-line, .edge.selected .edge-line {
+    stroke: #18262d;
+  }
+  #edge-preview { min-height: 1.5em; }
   .scroll { overflow: auto; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: .35rem .5rem; border-bottom: 1px solid #ddd; text-align: left; }
@@ -35,21 +39,36 @@
   <h1>Phrase contexts</h1>
   <p>Compare the wording around a phrase across poets in the Poet Style cohort.</p>
   <form>
-    <label>Character or phrase <input name="q" lang="zh-Hant" placeholder="秋風" required></label>
+    <label>Character or phrase <input name="q" lang="zh" placeholder="秋風 / 秋风" required></label>
     <label>Corpus <select name="scope">
       <option value="all">All cleaned poems by cohort poets</option>
       <option value="sample">Sampled poems used in Poet Style</option>
     </select></label>
+    <label>Spelling <select name="script">
+      <option value="both">Simplified and traditional</option>
+      <option value="exact">Exact spelling</option>
+    </select></label>
     <button type="submit">Search</button>
   </form>
-  <p id="status" role="status">Use the corpus spelling, such as 秋風.</p>
+  <p id="examples">Try an image with broad coverage in the full corpus:
+    <button type="button" lang="zh-Hant">春風</button> spring wind,
+    <button type="button" lang="zh-Hant">明月</button> bright moon, or
+    <button type="button" lang="zh-Hant">白雲</button> white clouds.
+  </p>
+  <p id="status" role="status"></p>
   <div id="results" hidden>
     <div class="layout">
       <section class="panel" aria-labelledby="graph-title">
         <h2 id="graph-title">Context similarity</h2>
         <div><span class="tang">● Tang collection</span> · <span class="song">● Song collection</span></div>
+        <p id="edge-preview"></p>
         <svg id="graph" viewBox="0 0 640 590" role="group" aria-label="Poet similarity network"></svg>
         <label>Compare a linked pair <select id="pair"></select></label>
+        <p id="score-summary"></p>
+        <p>A score near 0 means little overlap in the weighted characters and character
+        sequences around the phrase. A score of 1 means identical weighted profiles.
+        Read scores relative to other pairs in the same search. They measure wording;
+        deciding whether the imagery works similarly requires reading the passages.</p>
         <p>Thicker edges indicate higher cosine similarity. Each poet contributes up to three
         strongest positive links. Circular positions are for layout.</p>
       </section>
@@ -73,7 +92,9 @@
       deduplicated within poems. The calculation masks the phrase, weights surrounding
       character 1–3-grams by TF-IDF, and averages normalized context vectors within poems.
       Each matching poem has equal weight in its poet’s vector. Comparison requires at least
-      five matching poems and some surrounding wording to score.</p>
+      five matching poems and some surrounding wording to score. Both-script search uses
+      OpenCC to add standard spelling variants of the query and displays the spellings searched.
+      Use exact spelling to check an ambiguous conversion.</p>
     </details>
   </div>
 </main>
@@ -83,6 +104,9 @@
   const results = document.querySelector("#results");
   const graph = document.querySelector("#graph");
   const pair = document.querySelector("#pair");
+  const preview = document.querySelector("#edge-preview");
+  const summary = document.querySelector("#score-summary");
+  const examples = [...document.querySelectorAll("#examples button")];
   const details = document.querySelector("#details");
   const coverage = document.querySelector("#coverage");
   const submit = form.querySelector("button");
@@ -102,7 +126,7 @@
     return node;
   }
 
-  function showPassages(poet, phrase) {
+  function showPassages(poet, pattern) {
     const heading = element("h3", details, poet.author);
     heading.lang = "zh-Hant";
     element("p", details, `${poet.matching} matching poems · ${poet.occurrences} occurrences`);
@@ -113,15 +137,17 @@
       element("strong", quote, passage.title);
       for (const line of passage.lines) {
         const verse = element("div", quote);
-        line.normalize("NFC").split(phrase).forEach((part, index) => {
-          if (index) element("mark", verse, phrase);
-          verse.append(part);
+        line.normalize("NFC").split(pattern).forEach((part, index) => {
+          if (index % 2) element("mark", verse, part);
+          else verse.append(part);
         });
       }
     }
   }
 
   function render(data) {
+    // The backend returns only Han spellings.
+    const pattern = new RegExp(`(${data.spellings.join("|")})`, "u");
     const poets = new Map(data.poets.map(poet => [poet.id, poet]));
     const positions = new Map(data.nodes.map((id, i) => {
       const angle = 2 * Math.PI * i / data.nodes.length - Math.PI / 2;
@@ -139,7 +165,7 @@
       pair.value = "";
       edgeElements.forEach(edge => edge.classList.remove("selected"));
       element("h2", details, "Example passages");
-      showPassages(poet, data.phrase);
+      showPassages(poet, pattern);
     }
 
     function selectPair(index) {
@@ -150,21 +176,30 @@
       details.replaceChildren();
       element("h2", details, "Compare passages");
       element("p", details, `Contextual wording similarity · ${edge.score.toFixed(3)}`);
-      showPassages(poets.get(edge.left), data.phrase);
-      showPassages(poets.get(edge.right), data.phrase);
+      showPassages(poets.get(edge.left), pattern);
+      showPassages(poets.get(edge.right), pattern);
     }
 
+    const hint = data.edges.length ? "Hover over an edge to see its score." : "No links to inspect.";
+    preview.textContent = hint;
+    summary.textContent = data.pairCount
+      ? `Across ${data.pairCount} comparable pairs · median ${data.medianScore.toFixed(3)} · highest ${data.maxScore.toFixed(3)}`
+      : "Too few comparable poets to calculate pair scores.";
     pair.onchange = () => selectPair(pair.value);
     for (const [index, edge] of data.edges.entries()) {
       const [x1, y1] = positions.get(edge.left);
       const [x2, y2] = positions.get(edge.right);
       const label = `${poets.get(edge.left).author} / ${poets.get(edge.right).author}`;
-      const line = svg("line", graph, {x1, y1, x2, y2, stroke: "#a6b5b5",
+      const scoreLabel = `${label} · ${edge.score.toFixed(3)}`;
+      const group = svg("g", graph, {class: "edge", "aria-label": scoreLabel});
+      svg("line", group, {x1, y1, x2, y2, class: "edge-line",
         "stroke-width": 1.5 + 5 * edge.score});
-      svg("title", line, {}).textContent = label;
-      line.onclick = () => selectPair(index);
-      edgeElements.push(line);
-      pair.add(new Option(`${label} (${edge.score.toFixed(3)})`, index));
+      svg("line", group, {x1, y1, x2, y2, stroke: "transparent", "stroke-width": 10});
+      group.onpointerenter = () => { preview.textContent = scoreLabel; };
+      group.onpointerleave = () => { preview.textContent = hint; };
+      group.onclick = () => selectPair(index);
+      edgeElements.push(group);
+      pair.add(new Option(scoreLabel, index));
     }
     for (const [id, [x, y]] of positions) {
       const poet = poets.get(id);
@@ -201,13 +236,25 @@
     else element("p", details, "Select a poet in the coverage table to inspect available passages.");
     status.textContent = `「${data.phrase}」 · ${data.nodes.length} of ${data.poets.length} poets comparable · ` +
       (data.edges.length ? `${data.edges.length} links` : "No positive links available");
+    if (data.spellings.length > 1) {
+      status.textContent += ` · Spellings searched: ${data.spellings.join(" / ")}`;
+    }
     results.hidden = false;
+  }
+
+  for (const example of examples) {
+    example.onclick = () => {
+      form.elements.q.value = example.textContent.trim();
+      form.requestSubmit();
+    };
   }
 
   form.addEventListener("submit", async event => {
     event.preventDefault();
+    if (submit.disabled) return;
     const parameters = new URLSearchParams(new FormData(form));
     submit.disabled = true;
+    examples.forEach(example => { example.disabled = true; });
     results.hidden = true;
     status.textContent = "Searching the corpus…";
     try {
@@ -219,6 +266,7 @@
       status.textContent = error.message;
     } finally {
       submit.disabled = false;
+      examples.forEach(example => { example.disabled = false; });
     }
   });
 </script>

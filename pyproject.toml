@@ -3,7 +3,9 @@ name = "echoes-across-dynasties"
 version = "0.1.0"
 description = "Reproducible Classical Chinese poetry corpus preparation"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "opencc>=1.4.2,<2",
+]
 
 [project.scripts]
 echoes = "echoes.cli:main"

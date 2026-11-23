@@ -73,13 +73,12 @@ below, since a two-axis projection hides variation in other components.
 
 ## Phrase contexts
 
-Exact phrase matching uses one explicitly documented script. Initially preserve
-traditional corpus text; add optional OpenCC-derived search aliases later while
-retaining the original and documenting changed matches. Reject empty/non-Han
-queries. SQLite instr(text, ?) provides literal matching for 50 poets; ordinary
-FTS tokenization is not a Chinese substring index. Search normalized text for
-retrieval, but verify matches in original verse lines so punctuation removal cannot
-create false across-line matches. Define overlapping occurrence counting explicitly.
+The browser defaults to simplified and traditional search aliases generated with
+OpenCC. It displays the spellings searched, preserves the original verses, and
+offers an exact-spelling mode for reproducible literal queries. Reject empty/non-Han
+queries. SQLite instr(text, ?) finds candidates for the 50 poets. Verify each
+candidate within verse lines, counting non-overlapping literal matches across the
+accepted spellings.
 
 Use the matching verse line plus one line on each side, deduplicated per poem.
 Report: occurrence count, matching poems, occurrences/10,000 Han characters, and
