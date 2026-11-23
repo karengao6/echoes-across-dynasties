@@ -15,6 +15,11 @@
       linear-gradient(135deg, currentColor 50%, transparent 50%)
       right .43rem center / .3rem .3rem no-repeat; }
   .legend { display: flex; gap: 1rem; }
+  .zoom-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+  .zoom-controls[hidden] { display: none; }
+  .zoom-controls button { font: inherit; padding: .3rem .6rem; }
+  #plot { touch-action: none; user-select: none; cursor: grab; }
+  #plot:active { cursor: grabbing; }
   .tang { color: #9a4218; }
   .song { color: #136276; }
   svg { display: block; width: 100%; height: auto; background: #f8fafb; }
@@ -47,7 +52,15 @@
     <span><span class="tang" aria-hidden="true">●</span> Tang collection</span>
     <span><span class="song" aria-hidden="true">■</span> Song collection</span>
   </p>
-  <svg id="plot" viewBox="0 0 680 460" role="group" aria-label="Poet PCA scatterplot"></svg>
+  <div id="plot-tools" class="zoom-controls" role="group" aria-label="Plot zoom">
+    <button type="button" id="zoom-out" aria-controls="plot">Zoom out</button>
+    <button type="button" id="zoom-in" aria-controls="plot">Zoom in</button>
+    <button type="button" id="zoom-reset" aria-controls="plot">Reset zoom</button>
+    <output id="zoom-level" aria-label="Zoom level">100%</output>
+  </div>
+  <div id="plot-viewport">
+    <svg id="plot" viewBox="0 0 680 460" role="group" aria-label="Poet PCA scatterplot"></svg>
+  </div>
   <p id="detail" aria-live="polite"></p>
   <section id="character-loadings" aria-labelledby="loadings-heading" hidden>
     <h2 id="loadings-heading">Characters with the largest weights</h2>
@@ -79,13 +92,98 @@
   const horizontal = document.querySelector('#horizontal');
   const vertical = document.querySelector('#vertical');
   const plot = document.querySelector('#plot');
+  const viewport = document.querySelector('#plot-viewport');
+  const plotTools = document.querySelector('#plot-tools');
+  const zoomOut = document.querySelector('#zoom-out');
+  const zoomIn = document.querySelector('#zoom-in');
+  const zoomReset = document.querySelector('#zoom-reset');
+  const zoomLevel = document.querySelector('#zoom-level');
+  const maxZoom = 128;
+  let zoom = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  const pointers = new Map();
   const detail = document.querySelector('#detail');
-  const bounds = { left: 98, right: 650, top: 24, bottom: 390 };
+  const bounds = { left: 191, right: 557, top: 24, bottom: 390 };
+  const center = { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
 
   const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 1 });
   const axisName = index => `PC${index + 1}`;
   const axisLabel = (index, variance) => `${axisName(index)} (${percent.format(variance[index])})`;
   const format = score => Number(score.toPrecision(3)).toString();
+
+  function updateZoomControls() {
+    zoomLevel.value = `${Math.round(zoom * 100)}%`;
+    zoomOut.disabled = zoom === 1;
+    zoomIn.disabled = zoom === maxZoom;
+    zoomReset.disabled = zoom === 1 && offsetX === 0 && offsetY === 0;
+  }
+
+  function movePlot(factor, from = center, to = from) {
+    const nextZoom = Math.max(1, Math.min(maxZoom, zoom * factor));
+    const ratio = nextZoom / zoom;
+    offsetX = to.x - center.x - (from.x - center.x - offsetX) * ratio;
+    offsetY = to.y - center.y - (from.y - center.y - offsetY) * ratio;
+    zoom = nextZoom;
+    render(false);
+  }
+
+  function resetZoom() {
+    zoom = 1;
+    offsetX = offsetY = 0;
+  }
+
+  function plotPosition(event) {
+    return new DOMPoint(event.clientX, event.clientY).matrixTransform(plot.getScreenCTM().inverse());
+  }
+
+  function gesture() {
+    const [first, second] = pointers.values();
+    if (!second) return { center: first, distance: 1 };
+    return {
+      center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+      distance: Math.max(1, Math.hypot(first.x - second.x, first.y - second.y)),
+    };
+  }
+
+  zoomOut.addEventListener('click', () => movePlot(1 / 1.5));
+  zoomIn.addEventListener('click', () => movePlot(1.5));
+  zoomReset.addEventListener('click', () => {
+    resetZoom();
+    render(false);
+  });
+  plot.addEventListener('wheel', event => {
+    event.preventDefault();
+    const units = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 460 : 1;
+    movePlot(Math.exp(-event.deltaY * units * 0.002), plotPosition(event));
+  }, { passive: false });
+
+  plot.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || pointers.size >= 2) return;
+    pointers.set(event.pointerId, plotPosition(event));
+    if (pointers.size === 2) {
+      for (const id of pointers.keys()) plot.setPointerCapture(id);
+    }
+  });
+  plot.addEventListener('pointermove', event => {
+    if (!pointers.has(event.pointerId)) return;
+    const before = gesture();
+    const position = plotPosition(event);
+    const previous = pointers.get(event.pointerId);
+    if (!plot.hasPointerCapture(event.pointerId) &&
+        Math.hypot(position.x - previous.x, position.y - previous.y) < 4) return;
+    plot.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, position);
+    const after = gesture();
+    movePlot(after.distance / before.distance, before.center, after.center);
+  });
+  for (const eventName of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) {
+    plot.addEventListener(eventName, event => {
+      if (eventName !== 'pointerleave' || !plot.hasPointerCapture(event.pointerId)) {
+        pointers.delete(event.pointerId);
+      }
+    });
+  }
 
   for (const item of views.structure.features) {
     const li = document.createElement('li');
@@ -117,6 +215,7 @@
     vertical.value = '1';
     horizontal.dataset.previous = horizontal.value;
     vertical.dataset.previous = vertical.value;
+    resetZoom();
     render();
   }
 
@@ -141,29 +240,30 @@
     loadingTables.append(table);
   }
 
-  function draw(tag, attributes, content = '') {
+  function draw(tag, attributes, content = '', parent = plot) {
     const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
     element.textContent = content;
-    plot.append(element);
+    parent.append(element);
     return element;
   }
 
-  function render() {
+  function render(updateDetails = true) {
     const { scores, variance, loadings, unavailable } = views[representation.value];
     const xAxis = Number(horizontal.value);
     const yAxis = Number(vertical.value);
     plot.replaceChildren();
-    loadingTables.replaceChildren();
-    plot.style.display = unavailable ? 'none' : '';
+    updateZoomControls();
+    if (updateDetails) loadingTables.replaceChildren();
+    viewport.hidden = plotTools.hidden = Boolean(unavailable);
     if (unavailable) {
       detail.textContent = unavailable;
       return;
     }
     plot.setAttribute('aria-label', `${representation.selectedOptions[0].textContent} PCA, `
       + `${axisName(xAxis)} vs ${axisName(yAxis)}`);
-    detail.textContent = 'Focus or select a point to see the poet and their scores.';
-    if (loadings) {
+    if (updateDetails) detail.textContent = 'Focus or select a point to see the poet and their scores.';
+    if (updateDetails && loadings) {
       showLoadings(xAxis, loadings[xAxis]);
       showLoadings(yAxis, loadings[yAxis]);
     }
@@ -174,30 +274,46 @@
     );
     const step = 10 ** Math.floor(Math.log10(maxScore / 2));
     const limit = Math.ceil(maxScore * 1.1 / (2 * step)) * 2 * step;
-    const pixelsPerUnit = (bounds.bottom - bounds.top) / (2 * limit);
-    const xCenter = (bounds.left + bounds.right) / 2;
-    const yCenter = (bounds.top + bounds.bottom) / 2;
+    const pixelsPerUnit = (bounds.bottom - bounds.top) / (2 * limit) * zoom;
+    const xCenter = center.x + offsetX;
+    const yCenter = center.y + offsetY;
     const xPosition = score => xCenter + score * pixelsPerUnit;
     const yPosition = score => yCenter - score * pixelsPerUnit;
 
-    for (const tick of [-limit, -limit / 2, 0, limit / 2, limit]) {
-      const x = xPosition(tick);
-      const y = yPosition(tick);
-      const style = tick === 0 ? 'zero' : 'grid';
-      draw('line', { x1: x, x2: x, y1: bounds.top, y2: bounds.bottom, class: style });
-      draw('line', { x1: xPosition(-limit), x2: xPosition(limit), y1: y, y2: y, class: style });
-      draw('text', { x, y: 412, 'text-anchor': 'middle' }, format(tick));
-      draw('text', { x: xPosition(-limit) - 9, y: y + 5, 'text-anchor': 'end' }, format(tick));
+    const targetStep = (bounds.bottom - bounds.top) / pixelsPerUnit / 5;
+    const magnitude = 10 ** Math.floor(Math.log10(targetStep));
+    const tickStep = [1, 2, 5, 10].find(value => value * magnitude >= targetStep) * magnitude;
+    const formatTick = index => Number((index * tickStep).toPrecision(8)).toString();
+    const xMin = (bounds.left - xCenter) / pixelsPerUnit;
+    const xMax = (bounds.right - xCenter) / pixelsPerUnit;
+    const yMin = (yCenter - bounds.bottom) / pixelsPerUnit;
+    const yMax = (yCenter - bounds.top) / pixelsPerUnit;
+
+    for (let i = Math.ceil(xMin / tickStep); i <= Math.floor(xMax / tickStep); i++) {
+      const x = xPosition(i * tickStep);
+      draw('line', { x1: x, x2: x, y1: bounds.top, y2: bounds.bottom, class: i === 0 ? 'zero' : 'grid' });
+      draw('text', { x, y: 412, 'text-anchor': 'middle' }, formatTick(i));
     }
-    draw('text', { x: xCenter, y: 444, 'text-anchor': 'middle' }, axisLabel(xAxis, variance));
-    draw('text', { transform: `translate(30 ${yCenter}) rotate(-90)`, 'text-anchor': 'middle' },
+    for (let i = Math.ceil(yMin / tickStep); i <= Math.floor(yMax / tickStep); i++) {
+      const y = yPosition(i * tickStep);
+      draw('line', { x1: bounds.left, x2: bounds.right, y1: y, y2: y, class: i === 0 ? 'zero' : 'grid' });
+      draw('text', { x: bounds.left - 9, y: y + 5, 'text-anchor': 'end' }, formatTick(i));
+    }
+    draw('text', { x: center.x, y: 444, 'text-anchor': 'middle' }, axisLabel(xAxis, variance));
+    draw('text', { transform: `translate(30 ${center.y}) rotate(-90)`, 'text-anchor': 'middle' },
       axisLabel(yAxis, variance));
 
+    const clip = draw('clipPath', { id: 'plot-clip' });
+    draw('rect', {
+      x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top,
+    }, '', clip);
+    const points = draw('g', { 'clip-path': 'url(#plot-clip)' });
     for (const [index, poet] of poets.entries()) {
       const xScore = scores[index][xAxis];
       const yScore = scores[index][yAxis];
       const x = xPosition(xScore);
       const y = yPosition(yScore);
+      if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) continue;
       const tang = poet.dynasty === 'tang';
       const collection = tang ? 'Tang' : 'Song';
       const label = `${poet.author} · ${collection} collection · ${poet.poemCount} poems · `
@@ -206,7 +322,7 @@
       const shape = tang ? { cx: x, cy: y, r: 6 } : { x: x - 5, y: y - 5, width: 10, height: 10 };
       const point = draw(tang ? 'circle' : 'rect', {
         ...shape, class: `point ${poet.dynasty}`, tabindex: 0, role: 'img', 'aria-label': label,
-      });
+      }, '', points);
       for (const event of ['pointerenter', 'focus', 'click']) {
         point.addEventListener(event, () => { detail.textContent = label; });
       }
@@ -219,6 +335,7 @@
       if (select.value === other.value) other.value = select.dataset.previous;
       horizontal.dataset.previous = horizontal.value;
       vertical.dataset.previous = vertical.value;
+      resetZoom();
       render();
     });
   }
