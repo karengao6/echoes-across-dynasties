@@ -34,8 +34,10 @@ Outputs:
 - `outputs/subset.json`: selected poet IDs and exact sampled poem IDs.
 - `outputs/poet-style.html`: self-contained PCA scatterplot. Open the file in a
   browser, select the two axes, and hover over or focus a point for poet details.
-  The current baseline uses verse structure from the sampled poems. A cohort needs
-  at least two nonzero principal components to generate the page.
+  Switch between Verse structure and Character use with the View selector.
+  The character view uses individual Han character rates and shows the strongest
+  positive and negative weights for the two selected axes. Each plot needs at
+  least two nonzero principal components.
 - `outputs/data-cleaning.html`: linked companion page with cleaning counts,
   eligibility by poem cutoff, sampling limitations, and the feature rationale.
 

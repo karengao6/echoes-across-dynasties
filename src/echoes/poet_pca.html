@@ -24,13 +24,22 @@
   .point { fill: currentColor; stroke: white; stroke-width: 1.5; cursor: pointer; }
   .point:hover, .point:focus { stroke: #242b32; stroke-width: 3; outline: none; }
   #detail { min-height: 3em; }
+  .loadings { display: flex; flex-wrap: wrap; gap: 1rem; }
+  table { border-collapse: collapse; margin-bottom: 1rem; }
+  caption { font-weight: 600; text-align: left; }
+  td, th { border-bottom: 1px solid #d6dde2; padding: .25rem .6rem; text-align: left; }
+  td { font-variant-numeric: tabular-nums; }
+  td[lang] { font-size: 1.125rem; }
 </style>
 <main>
   <nav aria-label="Project pages"><a href="data-cleaning.html">Data and methods</a></nav>
   <h1>Poet style</h1>
-  <p>Each point represents one poet in the sampled cohort. Nearby points have
-    similar measured verse structure along the selected components.</p>
+  <p id="view-description"></p>
   <div class="controls">
+    <label>View <select id="representation">
+      <option value="structure">Verse structure</option>
+      <option value="characters">Character use</option>
+    </select></label>
     <label>Horizontal axis <select id="horizontal"></select></label>
     <label>Vertical axis <select id="vertical"></select></label>
   </div>
@@ -40,18 +49,33 @@
   </p>
   <svg id="plot" viewBox="0 0 680 460" role="group" aria-label="Poet PCA scatterplot"></svg>
   <p id="detail" aria-live="polite"></p>
+  <section id="character-loadings" aria-labelledby="loadings-heading" hidden>
+    <h2 id="loadings-heading">Characters with the largest weights</h2>
+    <p>Positive weights pull scores higher when a character is used more often than
+      the cohort average. Negative weights pull scores lower. A poet’s score combines
+      all character weights.</p>
+    <div id="loading-tables" class="loadings"></div>
+  </section>
   <details>
     <summary>Features and method</summary>
-    <p>PCA uses standardized poet-level summaries of Han verse lines. Each axis
-      shows its share of the variation in those summaries. The projection shows
-      only the selected components.</p>
-    <ul id="features"></ul>
+    <div id="structure-method">
+      <p>PCA uses standardized poet-level summaries of Han verse lines. Each axis
+        shows its share of the variation in those summaries.</p>
+      <ul id="features"></ul>
+    </div>
+    <p id="character-method" hidden></p>
   </details>
   <noscript>Enable JavaScript to switch axes and inspect poets.</noscript>
 </main>
 <script type="application/json" id="pca-data"><!-- PCA_DATA --></script>
 <script>
-  const { poets, variance, features } = JSON.parse(document.querySelector('#pca-data').textContent);
+  const { poets, views } = JSON.parse(document.querySelector('#pca-data').textContent);
+  const representation = document.querySelector('#representation');
+  const viewDescription = document.querySelector('#view-description');
+  const structureMethod = document.querySelector('#structure-method');
+  const characterMethod = document.querySelector('#character-method');
+  const loadingSection = document.querySelector('#character-loadings');
+  const loadingTables = document.querySelector('#loading-tables');
   const horizontal = document.querySelector('#horizontal');
   const vertical = document.querySelector('#vertical');
   const plot = document.querySelector('#plot');
@@ -60,16 +84,62 @@
 
   const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 1 });
   const axisName = index => `PC${index + 1}`;
-  const axisLabel = index => `${axisName(index)} (${percent.format(variance[index])})`;
-  for (const item of features) {
+  const axisLabel = (index, variance) => `${axisName(index)} (${percent.format(variance[index])})`;
+  const format = score => Number(score.toPrecision(3)).toString();
+
+  for (const item of views.structure.features) {
     const li = document.createElement('li');
     li.textContent = item;
     document.querySelector('#features').append(li);
   }
-  for (const select of [horizontal, vertical]) {
-    variance.forEach((_, index) => select.add(new Option(axisLabel(index), index)));
+  const characterView = views.characters;
+  characterMethod.textContent = `Uses ${characterView.vocabularySize.toLocaleString()} Han characters `
+    + `found in at least ${characterView.minimumPoets} sampled poets. Counts are divided by all `
+    + 'Han characters in each poet’s sample and expressed per 1,000. PCA centers each character’s '
+    + 'frequency across poets and keeps the original frequency scale. Shared characters can reflect '
+    + 'diction or subject matter. This view measures individual characters and ignores their order.';
+
+  function resetAxes() {
+    const view = views[representation.value];
+    const isCharacters = representation.value === 'characters';
+    viewDescription.textContent = isCharacters
+      ? 'Each point is a poet. Nearby points use individual Han characters at similar rates along the selected components.'
+      : 'Each point is a poet. Nearby points have similar verse structure along the selected components.';
+    structureMethod.hidden = isCharacters;
+    characterMethod.hidden = !isCharacters;
+    loadingSection.hidden = !isCharacters || Boolean(view.unavailable);
+    for (const select of [horizontal, vertical]) {
+      select.replaceChildren();
+      select.disabled = Boolean(view.unavailable);
+      view.variance?.forEach((_, index) => select.add(new Option(axisLabel(index, view.variance), index)));
+    }
+    horizontal.value = '0';
+    vertical.value = '1';
+    horizontal.dataset.previous = horizontal.value;
+    vertical.dataset.previous = vertical.value;
+    render();
   }
-  vertical.value = '1';
+
+  function showLoadings(axis, weights) {
+    const table = document.createElement('table');
+    table.createCaption().textContent = axisName(axis);
+    const headers = table.createTHead().insertRow();
+    for (const label of ['Character', 'Weight']) {
+      const header = document.createElement('th');
+      header.scope = 'col';
+      header.textContent = label;
+      headers.append(header);
+    }
+    const body = table.createTBody();
+    for (const [character, weight] of [...weights.positive, ...weights.negative]) {
+      const row = body.insertRow();
+      const cell = row.insertCell();
+      cell.lang = 'zh-Hant';
+      cell.textContent = character;
+      row.insertCell().textContent = (weight > 0 ? '+' : '') + format(weight);
+    }
+    loadingTables.append(table);
+  }
 
   function draw(tag, attributes, content = '') {
     const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -79,23 +149,36 @@
     return element;
   }
 
-  // A symmetric, shared scale gives both axes the same pixels per score unit.
-  const maxScore = Math.max(...poets.flatMap(poet => poet.scores.map(score => Math.abs(score))));
-  const step = 10 ** Math.floor(Math.log10(maxScore / 2));
-  const limit = Math.ceil(maxScore * 1.1 / (2 * step)) * 2 * step;
-  const pixelsPerUnit = (bounds.bottom - bounds.top) / (2 * limit);
-  const xCenter = (bounds.left + bounds.right) / 2;
-  const yCenter = (bounds.top + bounds.bottom) / 2;
-  const xPosition = score => xCenter + score * pixelsPerUnit;
-  const yPosition = score => yCenter - score * pixelsPerUnit;
-  const format = score => Number(score.toPrecision(3)).toString();
-
   function render() {
+    const { scores, variance, loadings, unavailable } = views[representation.value];
     const xAxis = Number(horizontal.value);
     const yAxis = Number(vertical.value);
     plot.replaceChildren();
-    plot.setAttribute('aria-label', `Poet PCA scatterplot, ${axisName(xAxis)} vs ${axisName(yAxis)}`);
+    loadingTables.replaceChildren();
+    plot.style.display = unavailable ? 'none' : '';
+    if (unavailable) {
+      detail.textContent = unavailable;
+      return;
+    }
+    plot.setAttribute('aria-label', `${representation.selectedOptions[0].textContent} PCA, `
+      + `${axisName(xAxis)} vs ${axisName(yAxis)}`);
     detail.textContent = 'Focus or select a point to see the poet and their scores.';
+    if (loadings) {
+      showLoadings(xAxis, loadings[xAxis]);
+      showLoadings(yAxis, loadings[yAxis]);
+    }
+
+    // Keep equal units on both axes and a stable scale when switching PCs within a view.
+    const maxScore = scores.reduce(
+      (max, row) => Math.max(max, ...row.map(score => Math.abs(score))), 0,
+    );
+    const step = 10 ** Math.floor(Math.log10(maxScore / 2));
+    const limit = Math.ceil(maxScore * 1.1 / (2 * step)) * 2 * step;
+    const pixelsPerUnit = (bounds.bottom - bounds.top) / (2 * limit);
+    const xCenter = (bounds.left + bounds.right) / 2;
+    const yCenter = (bounds.top + bounds.bottom) / 2;
+    const xPosition = score => xCenter + score * pixelsPerUnit;
+    const yPosition = score => yCenter - score * pixelsPerUnit;
 
     for (const tick of [-limit, -limit / 2, 0, limit / 2, limit]) {
       const x = xPosition(tick);
@@ -106,18 +189,20 @@
       draw('text', { x, y: 412, 'text-anchor': 'middle' }, format(tick));
       draw('text', { x: xPosition(-limit) - 9, y: y + 5, 'text-anchor': 'end' }, format(tick));
     }
-    draw('text', { x: xCenter, y: 444, 'text-anchor': 'middle' }, axisLabel(xAxis));
+    draw('text', { x: xCenter, y: 444, 'text-anchor': 'middle' }, axisLabel(xAxis, variance));
     draw('text', { transform: `translate(30 ${yCenter}) rotate(-90)`, 'text-anchor': 'middle' },
-      axisLabel(yAxis));
+      axisLabel(yAxis, variance));
 
-    for (const poet of poets) {
-      const x = xPosition(poet.scores[xAxis]);
-      const y = yPosition(poet.scores[yAxis]);
+    for (const [index, poet] of poets.entries()) {
+      const xScore = scores[index][xAxis];
+      const yScore = scores[index][yAxis];
+      const x = xPosition(xScore);
+      const y = yPosition(yScore);
       const tang = poet.dynasty === 'tang';
       const collection = tang ? 'Tang' : 'Song';
       const label = `${poet.author} · ${collection} collection · ${poet.poemCount} poems · `
-        + `${axisName(xAxis)} ${format(poet.scores[xAxis])} · `
-        + `${axisName(yAxis)} ${format(poet.scores[yAxis])}`;
+        + `${axisName(xAxis)} ${format(xScore)} · `
+        + `${axisName(yAxis)} ${format(yScore)}`;
       const shape = tang ? { cx: x, cy: y, r: 6 } : { x: x - 5, y: y - 5, width: 10, height: 10 };
       const point = draw(tang ? 'circle' : 'rect', {
         ...shape, class: `point ${poet.dynasty}`, tabindex: 0, role: 'img', 'aria-label': label,
@@ -136,8 +221,8 @@
       vertical.dataset.previous = vertical.value;
       render();
     });
-    select.dataset.previous = select.value;
   }
-  render();
+  representation.addEventListener('change', resetAxes);
+  resetAxes();
 </script>
 </html>

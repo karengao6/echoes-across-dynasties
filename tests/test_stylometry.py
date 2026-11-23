@@ -1,8 +1,9 @@
+from collections import Counter
 from statistics import mean, pvariance
 
 import pytest
 
-from echoes.stylometry import principal_components
+from echoes.stylometry import character_pca, principal_components
 
 
 def test_pca_orders_scores_by_variance_and_drops_constant_column():
@@ -21,3 +22,27 @@ def test_pca_orders_scores_by_variance_and_drops_constant_column():
 def test_pca_rejects_a_sample_with_fewer_than_two_components():
     with pytest.raises(ValueError, match="at least two varying components"):
         principal_components([(1,), (2,), (3,)])
+
+
+def test_character_pca_recovers_frequency_contrasts_and_loadings():
+    counts = [
+        Counter({"山": 25 + x, "水": 25 - x, "月": 25 + y, "風": 25 - y})
+        for x, y in [(-10, -5), (-10, 5), (10, -5), (10, 5)]
+    ]
+    view = character_pca(counts)
+    assert view["variance"] == pytest.approx([0.8, 0.2])
+    for axis, expected in enumerate([{"山", "水"}, {"月", "風"}]):
+        loadings = view["loadings"][axis]
+        char1, weight1 = loadings["positive"][0]
+        char2, weight2 = loadings["negative"][0]
+        assert {char1, char2} == expected
+        assert weight1 == pytest.approx(-weight2)
+        for poet, scores in zip(counts, view["scores"]):
+            expected_score = (poet[char1] - poet[char2]) * 10 * weight1
+            assert scores[axis] == pytest.approx(expected_score)
+
+
+def test_character_pca_flags_a_sample_without_a_shared_vocabulary():
+    view = character_pca([Counter("山"), Counter("水"), Counter("月")])
+    assert view["vocabularySize"] == 0
+    assert "unavailable" in view

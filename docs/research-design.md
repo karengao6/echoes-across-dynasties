@@ -62,7 +62,12 @@ and shaped by source collection. Default to PC1 and PC2 and allow readers to sel
 any two available nonzero components. Display explained variance on each axis.
 The implemented baseline standardizes the seven verse-structure summaries listed
 on the page across poets, drops constant columns, and fits PCA on that matrix.
-Lexical and function-character features are planned extensions. The scatterplot
+A second view fits a separate PCA on centered single-character rates per 1,000
+Han characters, using the same cohort. Keep characters seen in at least 20% of
+sampled poets (at least two) and show the strongest positive and negative
+loadings on the selected axes. Shared character use may reflect diction or
+subject matter. Character n-grams and a reviewed function-character view are
+planned extensions. The scatterplot
 is exploratory. Keep full-dimensional cosine for the quantitative comparisons
 below, since a two-axis projection hides variation in other components.
 
