@@ -111,3 +111,22 @@ Run `uv run pytest` and `uv run ruff check src tests` for the current verificati
 This is a schema smoke check, not full-corpus validation or a literary assessment.
 The smoke run used a placeholder revision and temporary database; it is not a
 research dataset or a reproducible experimental result. Run against a pinned checkout.
+
+## Explore phrase contexts
+
+After generating the PCA pages, run:
+
+```bash
+uv run echoes serve
+```
+
+Open [Phrase contexts](http://127.0.0.1:8000/phrase-contexts.html) and try `秋風`.
+Switch between all cleaned poems by the cohort and the exact Poet Style sample.
+Select a graph edge or use the pair menu to compare passages. The coverage table
+includes every cohort poet and gives access to examples even below the graph's
+five-matching-poem threshold. Edges measure contextual wording similarity using
+masked character 1–3-gram TF-IDF and cosine similarity.
+
+The server listens on loopback and opens SQLite read-only. Use `--db`, `--sample`,
+and `--output-dir` if you generated the project files at custom locations. The
+output directory should contain `poet-style.html` and `data-cleaning.html`.

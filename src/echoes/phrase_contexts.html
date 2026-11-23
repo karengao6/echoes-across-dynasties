@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phrase contexts · Echoes Across Dynasties</title>
+<style>
+  body { margin: 2rem auto; padding: 0 1rem; max-width: 72rem; color: #242b30;
+    background: #faf9f5; font: 1rem/1.5 system-ui, sans-serif; }
+  h1, h2 { font-family: Georgia, serif; }
+  a { color: #245476; }
+  form { display: flex; align-items: end; flex-wrap: wrap; gap: 1rem; }
+  label { display: grid; gap: .2rem; }
+  input, select, button { font: inherit; }
+  input, select, form button { padding: .35rem .6rem; }
+  button { cursor: pointer; }
+  .layout { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+  .panel { padding: 1rem; background: white; border: 1px solid #d6d9d7; min-width: 0; }
+  .tang { fill: #94601d; color: #805115; }
+  .song { fill: #226e75; color: #226e75; }
+  svg { display: block; width: 100%; height: auto; }
+  svg text { font-size: 15px; paint-order: stroke; stroke: white; stroke-width: 4px; }
+  svg g, svg line { cursor: pointer; }
+  svg .selected, svg line:hover { stroke: #18262d; }
+  .scroll { overflow: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: .35rem .5rem; border-bottom: 1px solid #ddd; text-align: left; }
+  blockquote { margin: .25rem 0 1rem; padding-left: .75rem; border-left: 2px solid #ccc; }
+  mark { background: #f6df9b; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+</style>
+<main>
+  <nav aria-label="Project pages">
+    <a href="poet-style.html">Poet style</a> · <a href="data-cleaning.html">Data and methods</a>
+  </nav>
+  <h1>Phrase contexts</h1>
+  <p>Compare the wording around a phrase across poets in the Poet Style cohort.</p>
+  <form>
+    <label>Character or phrase <input name="q" lang="zh-Hant" placeholder="秋風" required></label>
+    <label>Corpus <select name="scope">
+      <option value="all">All cleaned poems by cohort poets</option>
+      <option value="sample">Sampled poems used in Poet Style</option>
+    </select></label>
+    <button type="submit">Search</button>
+  </form>
+  <p id="status" role="status">Use the corpus spelling, such as 秋風.</p>
+  <div id="results" hidden>
+    <div class="layout">
+      <section class="panel" aria-labelledby="graph-title">
+        <h2 id="graph-title">Context similarity</h2>
+        <div><span class="tang">● Tang collection</span> · <span class="song">● Song collection</span></div>
+        <svg id="graph" viewBox="0 0 640 590" role="group" aria-label="Poet similarity network"></svg>
+        <label>Compare a linked pair <select id="pair"></select></label>
+        <p>Thicker edges indicate higher cosine similarity. Each poet contributes up to three
+        strongest positive links. Circular positions are for layout.</p>
+      </section>
+      <section class="panel" id="details" aria-label="Selected passages" aria-live="polite"></section>
+    </div>
+    <h2>Phrase coverage</h2>
+    <p>Select a poet to read example passages.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th scope="col">Poet</th><th scope="col">Collection</th>
+          <th scope="col">Occurrences</th><th scope="col">Matching poems / total</th>
+          <th scope="col">Han characters</th><th scope="col">Occurrences per 10,000 Han characters</th>
+          <th scope="col">Graph evidence</th></tr></thead>
+        <tbody id="coverage"></tbody>
+      </table>
+    </div>
+    <details>
+      <summary>How similarity is calculated</summary>
+      <p>Search counts literal, non-overlapping matches within verse lines. Each context includes
+      the matching line and one line on each side when available. Repeated passages are
+      deduplicated within poems. The calculation masks the phrase, weights surrounding
+      character 1–3-grams by TF-IDF, and averages normalized context vectors within poems.
+      Each matching poem has equal weight in its poet’s vector. Comparison requires at least
+      five matching poems and some surrounding wording to score.</p>
+    </details>
+  </div>
+</main>
+<script>
+  const form = document.querySelector("form");
+  const status = document.querySelector("#status");
+  const results = document.querySelector("#results");
+  const graph = document.querySelector("#graph");
+  const pair = document.querySelector("#pair");
+  const details = document.querySelector("#details");
+  const coverage = document.querySelector("#coverage");
+  const submit = form.querySelector("button");
+  const svgNS = "http://www.w3.org/2000/svg";
+
+  function element(tag, parent, value) {
+    const node = document.createElement(tag);
+    if (value !== undefined) node.textContent = value;
+    parent.append(node);
+    return node;
+  }
+
+  function svg(tag, parent, attributes) {
+    const node = document.createElementNS(svgNS, tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+    parent.append(node);
+    return node;
+  }
+
+  function showPassages(poet, phrase) {
+    const heading = element("h3", details, poet.author);
+    heading.lang = "zh-Hant";
+    element("p", details, `${poet.matching} matching poems · ${poet.occurrences} occurrences`);
+    if (!poet.passages.length) element("p", details, "No matching passages.");
+    for (const passage of poet.passages) {
+      const quote = element("blockquote", details);
+      quote.lang = "zh-Hant";
+      element("strong", quote, passage.title);
+      for (const line of passage.lines) {
+        const verse = element("div", quote);
+        line.normalize("NFC").split(phrase).forEach((part, index) => {
+          if (index) element("mark", verse, phrase);
+          verse.append(part);
+        });
+      }
+    }
+  }
+
+  function render(data) {
+    const poets = new Map(data.poets.map(poet => [poet.id, poet]));
+    const positions = new Map(data.nodes.map((id, i) => {
+      const angle = 2 * Math.PI * i / data.nodes.length - Math.PI / 2;
+      return [id, [320 + 202 * Math.cos(angle), 295 + 231 * Math.sin(angle)]];
+    }));
+    graph.replaceChildren();
+    pair.replaceChildren(new Option("Select a pair", ""));
+    pair.disabled = !data.edges.length;
+    coverage.replaceChildren();
+    details.replaceChildren();
+    const edgeElements = [];
+
+    function selectPoet(poet) {
+      details.replaceChildren();
+      pair.value = "";
+      edgeElements.forEach(edge => edge.classList.remove("selected"));
+      element("h2", details, "Example passages");
+      showPassages(poet, data.phrase);
+    }
+
+    function selectPair(index) {
+      const edge = data.edges[index];
+      if (!edge) return;
+      pair.value = index;
+      edgeElements.forEach((line, i) => line.classList.toggle("selected", i === Number(index)));
+      details.replaceChildren();
+      element("h2", details, "Compare passages");
+      element("p", details, `Contextual wording similarity · ${edge.score.toFixed(3)}`);
+      showPassages(poets.get(edge.left), data.phrase);
+      showPassages(poets.get(edge.right), data.phrase);
+    }
+
+    pair.onchange = () => selectPair(pair.value);
+    for (const [index, edge] of data.edges.entries()) {
+      const [x1, y1] = positions.get(edge.left);
+      const [x2, y2] = positions.get(edge.right);
+      const label = `${poets.get(edge.left).author} / ${poets.get(edge.right).author}`;
+      const line = svg("line", graph, {x1, y1, x2, y2, stroke: "#a6b5b5",
+        "stroke-width": 1.5 + 5 * edge.score});
+      svg("title", line, {}).textContent = label;
+      line.onclick = () => selectPair(index);
+      edgeElements.push(line);
+      pair.add(new Option(`${label} (${edge.score.toFixed(3)})`, index));
+    }
+    for (const [id, [x, y]] of positions) {
+      const poet = poets.get(id);
+      const group = svg("g", graph, {role: "button", tabindex: 0, "aria-label": poet.author});
+      svg("circle", group, {cx: x, cy: y, r: 6, class: poet.dynasty.toLowerCase()});
+      const left = x < 320;
+      svg("text", group, {x: x + (left ? -10 : 10), y: y + 5,
+        "text-anchor": left ? "end" : "start", lang: "zh-Hant"}).textContent = poet.author;
+      group.onclick = () => selectPoet(poet);
+      group.onkeydown = event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectPoet(poet);
+        }
+      };
+    }
+    for (const poet of [...data.poets].sort((a, b) => b.matching - a.matching)) {
+      const row = element("tr", coverage);
+      const button = element("button", element("th", row), poet.author);
+      button.parentElement.scope = "row";
+      button.lang = "zh-Hant";
+      button.onclick = () => { selectPoet(poet); details.scrollIntoView({block: "nearest"}); };
+      element("td", row, poet.dynasty);
+      element("td", row, poet.occurrences);
+      element("td", row, `${poet.matching} / ${poet.poems}`);
+      element("td", row, poet.characters.toLocaleString());
+      element("td", row, poet.characters ? (1e4 * poet.occurrences / poet.characters).toFixed(2) : "—");
+      element("td", row, positions.has(poet.id) ? "Comparable" :
+        poet.matching < 5 ? "Fewer than 5 matching poems" : "No surrounding wording");
+    }
+    graph.hidden = !data.nodes.length;
+    graph.style.display = data.nodes.length ? "" : "none";
+    if (data.edges.length) selectPair(0);
+    else element("p", details, "Select a poet in the coverage table to inspect available passages.");
+    status.textContent = `「${data.phrase}」 · ${data.nodes.length} of ${data.poets.length} poets comparable · ` +
+      (data.edges.length ? `${data.edges.length} links` : "No positive links available");
+    results.hidden = false;
+  }
+
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const parameters = new URLSearchParams(new FormData(form));
+    submit.disabled = true;
+    results.hidden = true;
+    status.textContent = "Searching the corpus…";
+    try {
+      const response = await fetch(`api/phrase?${parameters}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      render(data);
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+</script>
+</html>

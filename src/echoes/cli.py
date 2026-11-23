@@ -7,6 +7,7 @@ from pathlib import Path
 from .corpus import ingest
 from .methods import render_methods
 from .sampling import select
+from .server import serve
 from .stylometry import poet_pca, render_page
 
 
@@ -35,6 +36,11 @@ def main():
     pca.add_argument("--db", type=Path, default=Path("data/poetry.sqlite"))
     pca.add_argument("--sample", type=Path, default=Path("outputs/subset.json"))
     pca.add_argument("--output", type=Path, default=Path("outputs/poet-style.html"))
+    web = sub.add_parser("serve", help="Serve the project and phrase-context search locally")
+    web.add_argument("--db", type=Path, default=Path("data/poetry.sqlite"))
+    web.add_argument("--sample", type=Path, default=Path("outputs/subset.json"))
+    web.add_argument("--output-dir", type=Path, default=Path("outputs"))
+    web.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     if args.command == "ingest":
         report = ingest(args.source, args.db, args.revision)
@@ -47,6 +53,11 @@ def main():
         write_json(args.output, manifest)
         print(f"Selected {len(manifest['poets'])} poets")
 
+    elif args.command == "serve":
+        try:
+            serve(args.db, args.sample, args.output_dir, args.port)
+        except (OSError, sqlite3.Error, ValueError, KeyError) as exc:
+            web.error(str(exc))
     else:
         try:
             methods_output = args.output.with_name("data-cleaning.html")
