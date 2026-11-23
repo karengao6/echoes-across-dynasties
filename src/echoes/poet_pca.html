@@ -5,7 +5,7 @@
 <title>Poet style · Echoes Across Dynasties</title>
 <style>
   body { font: 1rem/1.5 system-ui, sans-serif; color: #242b32; margin: 0; }
-  main { max-width: 54rem; padding: 2rem 1rem; margin: auto; }
+  main { max-width: 70rem; padding: 2rem 1rem; margin: auto; }
   h1 { margin: 0; }
   .controls { display: flex; flex-wrap: wrap; gap: 1rem; }
   select { font: inherit; padding: .3rem 1.7rem .3rem .5rem; appearance: none;
@@ -29,6 +29,16 @@
   .point { fill: currentColor; stroke: white; stroke-width: 1.5; cursor: pointer; }
   .point:hover, .point:focus { stroke: #242b32; stroke-width: 3; outline: none; }
   #detail { min-height: 3em; }
+  .plot-layout { display: grid; grid-template-columns: minmax(0, 1fr) 15rem; gap: 1rem; }
+  .poet-roster { align-self: start; background: #f8fafb; padding: .75rem; border-radius: .25rem; }
+  .poet-roster h2 { font-size: 1rem; margin: 0 0 .5rem; }
+  .roster-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  .roster-groups h3 { font-size: .875rem; margin: 0; }
+  .roster-groups ul { list-style: none; margin: .25rem 0 0; padding: 0; }
+  .roster-groups li { overflow-wrap: anywhere; }
+  @media (max-width: 48rem) {
+    .plot-layout { grid-template-columns: minmax(0, 1fr); }
+  }
   .loadings { display: flex; flex-wrap: wrap; gap: 1rem; }
   table { border-collapse: collapse; margin-bottom: 1rem; }
   caption { font-weight: 600; text-align: left; }
@@ -49,8 +59,8 @@
     <label>Vertical axis <select id="vertical"></select></label>
   </div>
   <p class="legend">
-    <span><span class="tang" aria-hidden="true">●</span> Tang collection</span>
-    <span><span class="song" aria-hidden="true">■</span> Song collection</span>
+    <span><span class="tang" aria-hidden="true">●</span> <span id="tang-legend">Tang collection</span></span>
+    <span><span class="song" aria-hidden="true">■</span> <span id="song-legend">Song collection</span></span>
   </p>
   <div id="plot-tools" class="zoom-controls" role="group" aria-label="Plot zoom">
     <button type="button" id="zoom-out" aria-controls="plot">Zoom out</button>
@@ -58,10 +68,27 @@
     <button type="button" id="zoom-reset" aria-controls="plot">Reset zoom</button>
     <output id="zoom-level" aria-label="Zoom level">100%</output>
   </div>
-  <div id="plot-viewport">
-    <svg id="plot" viewBox="0 0 680 460" role="group" aria-label="Poet PCA scatterplot"></svg>
+  <div class="plot-layout">
+    <div>
+      <div id="plot-viewport">
+        <svg id="plot" viewBox="0 0 680 460" role="group" aria-label="Poet PCA scatterplot"></svg>
+      </div>
+      <p id="detail" aria-live="polite"></p>
+    </div>
+    <aside class="poet-roster" aria-labelledby="roster-heading">
+      <h2 id="roster-heading">Poets compared</h2>
+      <div class="roster-groups">
+        <section aria-labelledby="tang-roster-heading">
+          <h3 id="tang-roster-heading" class="tang">Tang</h3>
+          <ul id="tang-poets" role="list" lang="zh-Hant"></ul>
+        </section>
+        <section aria-labelledby="song-roster-heading">
+          <h3 id="song-roster-heading" class="song">Song</h3>
+          <ul id="song-poets" role="list" lang="zh-Hant"></ul>
+        </section>
+      </div>
+    </aside>
   </div>
-  <p id="detail" aria-live="polite"></p>
   <section id="character-loadings" aria-labelledby="loadings-heading" hidden>
     <h2 id="loadings-heading">Characters with the largest weights</h2>
     <p>Positive weights pull scores higher when a character is used more often than
@@ -111,6 +138,20 @@
   const axisName = index => `PC${index + 1}`;
   const axisLabel = (index, variance) => `${axisName(index)} (${percent.format(variance[index])})`;
   const format = score => Number(score.toPrecision(3)).toString();
+
+  for (const [dynasty, name] of [['tang', 'Tang'], ['song', 'Song']]) {
+    const group = poets.filter(poet => poet.dynasty === dynasty);
+    const count = group.length;
+    const noun = count === 1 ? 'poet' : 'poets';
+    document.querySelector(`#${dynasty}-legend`).textContent =
+      `${name} collection (${count.toLocaleString('en')} ${noun})`;
+    const roster = document.querySelector(`#${dynasty}-poets`);
+    for (const poet of group) {
+      const item = document.createElement('li');
+      item.textContent = poet.author;
+      roster.append(item);
+    }
+  }
 
   function updateZoomControls() {
     zoomLevel.value = `${Math.round(zoom * 100)}%`;
