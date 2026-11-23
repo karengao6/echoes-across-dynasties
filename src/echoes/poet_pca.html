@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poet style · Echoes Across Dynasties</title>
+<style>
+  body { font: 1rem/1.5 system-ui, sans-serif; color: #242b32; margin: 0; }
+  main { max-width: 54rem; padding: 2rem 1rem; margin: auto; }
+  h1 { margin: 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 1rem; }
+  select { font: inherit; padding: .3rem 1.7rem .3rem .5rem; appearance: none;
+    border: 1px solid #64707a; border-radius: .25rem;
+    background: linear-gradient(45deg, transparent 50%, currentColor 50%)
+      right .73rem center / .3rem .3rem no-repeat,
+      linear-gradient(135deg, currentColor 50%, transparent 50%)
+      right .43rem center / .3rem .3rem no-repeat; }
+  .legend { display: flex; gap: 1rem; }
+  .tang { color: #9a4218; }
+  .song { color: #136276; }
+  svg { display: block; width: 100%; height: auto; background: #f8fafb; }
+  svg text { font: 15px system-ui, sans-serif; fill: #242b32; }
+  .grid { stroke: #d6dde2; }
+  .zero { stroke: #7f8d99; }
+  .point { fill: currentColor; stroke: white; stroke-width: 1.5; cursor: pointer; }
+  .point:hover, .point:focus { stroke: #242b32; stroke-width: 3; outline: none; }
+  #detail { min-height: 3em; }
+</style>
+<main>
+  <nav aria-label="Project pages"><a href="data-cleaning.html">Data and methods</a></nav>
+  <h1>Poet style</h1>
+  <p>Each point represents one poet in the sampled cohort. Nearby points have
+    similar measured verse structure along the selected components.</p>
+  <div class="controls">
+    <label>Horizontal axis <select id="horizontal"></select></label>
+    <label>Vertical axis <select id="vertical"></select></label>
+  </div>
+  <p class="legend">
+    <span><span class="tang" aria-hidden="true">●</span> Tang collection</span>
+    <span><span class="song" aria-hidden="true">■</span> Song collection</span>
+  </p>
+  <svg id="plot" viewBox="0 0 680 460" role="group" aria-label="Poet PCA scatterplot"></svg>
+  <p id="detail" aria-live="polite"></p>
+  <details>
+    <summary>Features and method</summary>
+    <p>PCA uses standardized poet-level summaries of Han verse lines. Each axis
+      shows its share of the variation in those summaries. The projection shows
+      only the selected components.</p>
+    <ul id="features"></ul>
+  </details>
+  <noscript>Enable JavaScript to switch axes and inspect poets.</noscript>
+</main>
+<script type="application/json" id="pca-data"><!-- PCA_DATA --></script>
+<script>
+  const { poets, variance, features } = JSON.parse(document.querySelector('#pca-data').textContent);
+  const horizontal = document.querySelector('#horizontal');
+  const vertical = document.querySelector('#vertical');
+  const plot = document.querySelector('#plot');
+  const detail = document.querySelector('#detail');
+  const bounds = { left: 98, right: 650, top: 24, bottom: 390 };
+
+  const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 1 });
+  const axisName = index => `PC${index + 1}`;
+  const axisLabel = index => `${axisName(index)} (${percent.format(variance[index])})`;
+  for (const item of features) {
+    const li = document.createElement('li');
+    li.textContent = item;
+    document.querySelector('#features').append(li);
+  }
+  for (const select of [horizontal, vertical]) {
+    variance.forEach((_, index) => select.add(new Option(axisLabel(index), index)));
+  }
+  vertical.value = '1';
+
+  function draw(tag, attributes, content = '') {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+    element.textContent = content;
+    plot.append(element);
+    return element;
+  }
+
+  // A symmetric, shared scale gives both axes the same pixels per score unit.
+  const maxScore = Math.max(...poets.flatMap(poet => poet.scores.map(score => Math.abs(score))));
+  const step = 10 ** Math.floor(Math.log10(maxScore / 2));
+  const limit = Math.ceil(maxScore * 1.1 / (2 * step)) * 2 * step;
+  const pixelsPerUnit = (bounds.bottom - bounds.top) / (2 * limit);
+  const xCenter = (bounds.left + bounds.right) / 2;
+  const yCenter = (bounds.top + bounds.bottom) / 2;
+  const xPosition = score => xCenter + score * pixelsPerUnit;
+  const yPosition = score => yCenter - score * pixelsPerUnit;
+  const format = score => Number(score.toPrecision(3)).toString();
+
+  function render() {
+    const xAxis = Number(horizontal.value);
+    const yAxis = Number(vertical.value);
+    plot.replaceChildren();
+    plot.setAttribute('aria-label', `Poet PCA scatterplot, ${axisName(xAxis)} vs ${axisName(yAxis)}`);
+    detail.textContent = 'Focus or select a point to see the poet and their scores.';
+
+    for (const tick of [-limit, -limit / 2, 0, limit / 2, limit]) {
+      const x = xPosition(tick);
+      const y = yPosition(tick);
+      const style = tick === 0 ? 'zero' : 'grid';
+      draw('line', { x1: x, x2: x, y1: bounds.top, y2: bounds.bottom, class: style });
+      draw('line', { x1: xPosition(-limit), x2: xPosition(limit), y1: y, y2: y, class: style });
+      draw('text', { x, y: 412, 'text-anchor': 'middle' }, format(tick));
+      draw('text', { x: xPosition(-limit) - 9, y: y + 5, 'text-anchor': 'end' }, format(tick));
+    }
+    draw('text', { x: xCenter, y: 444, 'text-anchor': 'middle' }, axisLabel(xAxis));
+    draw('text', { transform: `translate(30 ${yCenter}) rotate(-90)`, 'text-anchor': 'middle' },
+      axisLabel(yAxis));
+
+    for (const poet of poets) {
+      const x = xPosition(poet.scores[xAxis]);
+      const y = yPosition(poet.scores[yAxis]);
+      const tang = poet.dynasty === 'tang';
+      const collection = tang ? 'Tang' : 'Song';
+      const label = `${poet.author} · ${collection} collection · ${poet.poemCount} poems · `
+        + `${axisName(xAxis)} ${format(poet.scores[xAxis])} · `
+        + `${axisName(yAxis)} ${format(poet.scores[yAxis])}`;
+      const shape = tang ? { cx: x, cy: y, r: 6 } : { x: x - 5, y: y - 5, width: 10, height: 10 };
+      const point = draw(tang ? 'circle' : 'rect', {
+        ...shape, class: `point ${poet.dynasty}`, tabindex: 0, role: 'img', 'aria-label': label,
+      });
+      for (const event of ['pointerenter', 'focus', 'click']) {
+        point.addEventListener(event, () => { detail.textContent = label; });
+      }
+    }
+  }
+
+  // Selecting the other axis's component swaps axes and preserves two distinct PCs.
+  for (const [select, other] of [[horizontal, vertical], [vertical, horizontal]]) {
+    select.addEventListener('change', () => {
+      if (select.value === other.value) other.value = select.dataset.previous;
+      horizontal.dataset.previous = horizontal.value;
+      vertical.dataset.previous = vertical.value;
+      render();
+    });
+    select.dataset.previous = select.value;
+  }
+  render();
+</script>
+</html>

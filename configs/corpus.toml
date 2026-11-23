@@ -1,0 +1,5 @@
+seed = 42
+poets_per_dynasty = 25
+poems_per_poet = 100
+# Empty means all measurable forms; this label is NOT historical genre annotation.
+form = ""

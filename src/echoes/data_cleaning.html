@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data and methods · Echoes Across Dynasties</title>
+<style>
+  body {{ font: 1rem/1.5 system-ui, sans-serif; color: #242b32; margin: 0; }}
+  main {{ max-width: 54rem; padding: 2rem 1rem; margin: auto; }}
+  a {{ color: #136276; }}
+  code {{ overflow-wrap: anywhere; }}
+  table {{ border-collapse: collapse; margin: 1rem 0; width: 100%; }}
+  th, td {{ border-bottom: 1px solid #d6dde2; padding: .45rem .5rem; text-align: left; }}
+  thead {{ background: #f8fafb; }}
+  td {{ text-align: right; font-variant-numeric: tabular-nums; }}
+  dt {{ font-weight: 600; }}
+  dd {{ margin: 0 0 .75rem; }}
+</style>
+<main>
+  <nav aria-label="Project pages"><a href="{plot_href}">Poet style</a></nav>
+  <h1>Data and methods</h1>
+
+  <section>
+    <h2>Corpus and cleaning</h2>
+    <p>{source_selection}</p>
+    <p>Imported {file_count} files from the <code>chinese-poetry</code> dataset at
+      recorded revision <code>{revision}</code>.</p>
+    <ol>
+      <li>Require an author, a title, and a list of text paragraphs. Exclude anonymous
+        attributions, known damage markers, and records without Han characters.</li>
+      <li>Keep the original paragraphs. For duplicate matching, normalize to Unicode NFC
+        and keep only Han characters so whitespace and punctuation variants match.</li>
+      <li>Keep one representative per normalized text when all records name the same poet
+        in the same source collection. Preserve the source records in its provenance.
+        Exclude identical texts with competing attributions.</li>
+      <li>For feature extraction, split the original paragraphs at punctuation and
+        line breaks, then count Han characters in each resulting verse line.</li>
+    </ol>
+    <table>
+      <thead><tr><th scope="col">Cleaning outcome</th><th scope="col">Records</th></tr></thead>
+      <tbody>{cleaning_rows}</tbody>
+    </table>
+    <p>These rules can miss near-duplicates, spelling variants, unmarked damage, and
+      inconsistent author names. Different editions can also use different punctuation,
+      which affects where the line splitter places boundaries.</p>
+  </section>
+
+  <section>
+    <h2>Which poets qualify?</h2>
+    <p>Each row counts poet identities with at least that many distinct eligible poems after
+      cleaning. An identity is an author name within one source collection. Active form
+      filter: {form}.</p>
+    <table>
+      <thead><tr><th scope="col">Minimum poems</th><th scope="col">Tang</th>
+        <th scope="col">Song</th><th scope="col">Total</th></tr></thead>
+      <tbody>{eligibility_rows}</tbody>
+    </table>
+    <p>The plot uses {tang} Tang and {song} Song poet identities, with {cutoff} poems
+      per poet ({sampled_poems} poems total). Seed {seed} fixes the ordering used to
+      select eligible poets and poems, so rerunning with the same inputs reproduces the sample.</p>
+    <p>Equal poem counts give each profile the same number of works, while total line and
+      character counts can differ. The cutoff favors authors with more surviving works in
+      this corpus. Comparing repeated samples and different cutoffs can show how sensitive
+      the apparent groupings are to those choices.</p>
+  </section>
+
+  <section>
+    <h2>Why these seven features?</h2>
+    <p>Line length, poem size, and repetition give a measurable baseline for verse
+      structure using the available text. The same rules apply to both collections.</p>
+    <dl>{feature_rows}</dl>
+    <p>For repeated characters and lines, the fraction is one minus the number of unique
+      items divided by the total number of items in a poem. These two fractions and line
+      counts are averaged across poems. The line-length summaries pool the sampled lines.</p>
+    <p>PCA centers and scales each varying feature across poets and drops constant features.
+      Each component combines features by weight, and the chart labels each axis with the
+      share of variance it explains. Related features can reinforce the same underlying
+      signal, such as preference for a particular line length.</p>
+    <p>These features can reflect a poet’s mix of forms as well as their writing habits.
+      They omit character identity, syntax, rhyme, and themes. A tight group in the
+      chart is a starting point for comparing verse structure and reading the poems.</p>
+  </section>
+</main>
+</html>
